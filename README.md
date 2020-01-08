@@ -1,1 +1,1 @@
-# Georgia-Tech
+# GATech
