@@ -1,0 +1,5 @@
+Support Vector Machines:
+http://pyml.sourceforge.net/doc/howto.pdf
+
+kNN:
+http://www.statsoft.com/Textbook/k-Nearest-Neighbors
