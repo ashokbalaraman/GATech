@@ -1,0 +1,521 @@
+---
+Author  : Ashok Balaraman 
+Email   : (abalaraman6@gatech.edu)
+Subject : "Introduction To Analytics Modeling - HW1"
+Topics  : svm, kNN
+output: html_notebook
+---
+
+<style>
+body{
+  font-family: 'Oxygen', sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+h1,h2,h3,h4 {
+  font-family: 'Raleway', sans-serif;
+}
+
+.container { width: 1000px; }
+h3 {
+  background-color: #D4DAEC;
+  text-indent: 0px; 
+}
+h4 {
+  text-indent: 0px;
+}
+
+g-table-intro h4 {
+  text-indent: 0px;
+}
+</style>
+
+# Introduction to Analytics Modeling 
+
+## Support Vector Machines
+```
+A Support Vector Machine (SVM) is a discriminative classifier formally defined by a separating  hyperplane. In other words, given labeled training data (supervised learning), the algorithm outputs an optimal hyperplane which categorizes new examples. In two dimentional space this hyperplane is a line dividing a plane in two parts where in each class lay in either side.
+```
+
+### Question 2.1
+
+
+**Describe a situation or problem from your job, everyday life, current events, etc., for which a classification model would be appropriate. List some (up to 5) predictors that you might use.**
+
+```
+I work for a medical device company. Any complaint about the product can be lodged by Customers /Hospitals / Patients / Whoever hears a complaint by calling the customer service dedicated line.  The Customer Service Representative types the complaint in free text format with great detail, mostly beween 5000-8000 words. Being a medical derive complaint, to avoid penalty, we need to identify if a complaint is FDA reportable or not within 3 days.  As this is a super sensitive, it is read and reread atleast by 3 different people which causes huge backlogs, especially when new products are relased.
+
+In my opinion, as we have good dataset that are already classified, we can use supervised ML and use classifiers like kNN & SVM to classify if a recordset is FDA Reportable or not.  
+
+Features: PhoneNotes, InvestigationText, ComplaintCategory
+Reponse Variable:  FDAReportable (Y/N)
+
+```
+### Question 2.2.1
+
+**Using the support vector machine function ksvm contained in the R package kernlab, find a good classifier for this data. Show the equation of your classifier, and how well it classifies the data points in the full data set. (Don’t worry about test/validation data yet; we’ll cover that topic soon.)**
+
+```{r warning=FALSE, message=FALSE}
+library(rmarkdown)  # Library for converting R Markdown into variety of formats
+library(kernlab)    # Library for generating SVM models
+library(caret)      # Library for deriving Confusion Matrix to validate accuracy of the model
+library(ggplot2)    # Library for Data Visualization
+library(data.table) # Library for Data Wrangling
+library(dplyr)      # Library for Data Wrangling
+library(rlist)      # Library for Rlist Maipulation
+library(knitr)      # Library for knitting R Markdown objects
+library(kknn)       # Library for generating kNN models
+
+cc.DF <- read.table("C:/Users/ashokb/Desktop/Desktop/Georgia Tech/Introduction To Analytics Modeling/HW-1/credit_card_data-headers.txt",header=TRUE)
+
+```
+**Let us try to give some meaningful column names for analysis**
+
+```{r}
+setnames(cc.DF,old=c("A1","A2","A3","A8","A9","A10","A11","A12","A14","A15","R1"),new=c("Sex","Age","Debt","YearsEmployed","PriorDefault","BankCustomer","CreditScore","Citizen","Zipcode","Income","Approved"))
+print(colnames(cc.DF))
+```
+
+```{r}
+paste("The dataset has ",nrow(cc.DF)," Row & ",ncol(cc.DF)," Columns.")
+```
+
+```{r}
+head(cc.DF,10)
+```
+
+- **Continuous Variables:** Age, Debt, YearsEmployed, CreditScore, Zipcode, Income
+- **Binary Variables:** Sex, PriorDefault, BankCustomer,Citizen 
+- **Response Variable:** Approved
+
+# Analysis #1
+```
+To understand the concepts, I want to visualize each and every step of the process, including the Support Vectors.  The visualization is not possible for more than 3-dimensions.  So, let us consider ONLY 2 meaniful features and visualize the Support Vectors.  This will give us a good idea if the data is linearly seperable or not, which inturn will help us decide on choosing the right kernel for the dataset.I want to just consider 2 features that are more sesitive to the outcome. In this case, Income & Credit Score are two features that has huge impact on the Credit Approval process. Once the understanding is clear, I want to included all the 10 features and run the model to generate the classifier.  
+
+```
+**Let us visualize, using ggplot, the effect of Credit Score & Income on Approval**
+
+```{r}
+ggplot(cc.DF) +
+  aes(x=cc.DF$CreditScore, y=cc.DF$Income, color=cc.DF$Approved) + 
+  #aes(x=cc.DF$CreditScore, y=cc.DF$Income, shape=factor(cc.DF$Approved)) +
+  geom_point(show.legend=FALSE) + 
+  ggtitle("Effect of Credit Score & Income on Credit Approval") +
+  xlab("Credit Score") + 
+  ylab("Income")
+
+```
+**Visualization Inference**
+
+- From the 2D graph we can clearly see that the data is not linearly seperable. In this case we can use Soft Margin Classification 
+- Also there are some Data Quality issues.  Few credit scores are 0, when they are the highest earner.
+- Many data points have Income=0 & Credit Score=0
+- Remove the data from dataset that has Income or Credit Score = 0
+
+### Data Analysis
+
+```
+Let us group the data into bins and understand the distribution to see if anymore cleaning is possible. Again this is all to understand how data cleaning helps with the accuracy of the classifier
+
+```
+
+```{r}
+breaks <- c(0,1,500,1000,5000,10000,200000)
+
+bins <- c("[0]","[1,500)","[500,1000)","[1000,5000)","[5000,10000)","[10000,200000)")
+
+IncomeGroup <- cut(cc.DF$Income,
+                   breaks=breaks,
+                   include.lowest=TRUE,
+                   right=FALSE,
+                   labels=bins)
+
+summary(IncomeGroup)
+```
+
+- Almost 50% of the data has 0 Income.  
+- Also, as Income & Credit have greater influence in credit approveal in real life, let us remove records with Income = 0 & CreditScore = 0
+- Let us filter out Records with 0 Income and see if it makes sense
+
+### Data Cleansing
+```{r}
+cc.DF <- cc.DF[cc.DF$Income!=0 & cc.DF$CreditScore!=0,]
+```
+
+```{r}
+ggplot(cc.DF) +
+  aes(x=cc.DF$CreditScore, y=cc.DF$Income, color=cc.DF$Approved) + 
+  #aes(x=cc.DF$CreditScore, y=cc.DF$Income, shape=factor(cc.DF$Approved)) +
+  geom_point(show.legend=FALSE) + 
+  ggtitle("Effect of Credit Score & Income on Credit Approval") +
+  xlab("Credit Score") + 
+  ylab("Income")
+
+```
+
+*Now we have a clean, meaningful data set to work with *
+
+*Still the data is not linearly seperable. We need to use Soft Margin Classification*
+
+### Which kernel to choose?
+
+```
+# Here are the type of kernels available for SVM
+# https://data-flair.training/blogs/svm-kernel-functions/
+
+# rbfdot - Radial Basis kernel "Gaussian"
+# This Kernel is typically used when no further prior knowledge is available about the data
+
+# polydot - Polynomial kernel
+# Popular in Image Processing.  Primarily used for Image Classification
+
+# vanilladot - Linear kernel
+# Simplest of all kernals, used primarily for text categorization 
+
+# tanhdot - Hyperbolic tangent kernel
+# Used as a proxy for Neural Networks
+
+# laplacedot - Laplacian kernel
+# This Kernel is typically used when no further prior knowledge is available about the data
+
+# besseldot - Bessel kernel
+# This Kernel is typically used when no further prior knowledge is available about the data
+
+# anovadot - ANOVA RBF kernel
+# This performs well in multidimensional regression
+
+# Which Kernel to use:
+# From the above definitions, and especially our data is not linearly seperable, let us try rbfdotl, laplacedot, besseldot & vanilladot
+# Thought vanilladot is used typically for linearly seperable data, for covering the assignment use cases this will be used.
+
+# call ksvm. Vanilladot is a simple linear kernel.
+# Let us use only 2 features to understand and visualize
+
+```
+### SVM Model Fitting with 2 Features (Income & Credit Score)
+```{r  warning=FALSE}
+kernel <- list()
+cost <- list()
+accuracy <- list()
+features <- list()
+for (C in c(1,10,20,30,40,50,60,70,80,90,100))
+{
+  for (k in c('vanilladot','rbfdot','polydot','laplacedot','tanhdot','besseldot','anovadot'))
+  {
+    cost <- c(cost,C)
+    kernel <- c(kernel,k)
+    features <-c(features,'[Income,Credit Score]')
+    svm.vanilla.model <- ksvm(x=as.matrix(select(cc.DF,c('Income','CreditScore'))), #x can be a Matrix or Vector
+                              # data=dataframe, # Used when X is a formula
+                              y=as.factor(cc.DF[,11]), # Response variable
+                              type="C-svc", # Type based on the problem Classification/Regression/Novelty Detection 
+                              kernel=k, #Kernel based on the type of data we are classifying
+                              C=C, # Cost of constraint violation. Default is 1
+                              scaled=TRUE # To indicate if the variables (x & y) to be scaled or not
+                              # Scaling all features to comparable ranges controls the dominance of features with the largest range
+    )
+    
+    # Let us look at how many support vectors we get and let us plot them
+    svm.vanilla.model@nSV
+    x <- as.matrix(select(cc.DF,c('Income','CreditScore')))
+    sv <- x[alphaindex(svm.vanilla.model)[[1]],]
+    # Print the Support Vectors
+    as.data.frame(sv)
+    # Plotting the Support Vectors
+    p <- ggplot(as.data.frame(sv)) + 
+      aes(x=as.data.frame(sv)$CreditScore, y=as.data.frame(sv)$Income, color=as.data.frame(sv)$Approved) + 
+      #aes(x=cc.DF$CreditScore, y=cc.DF$Income, shape=factor(cc.DF$Approved)) +
+      geom_point(show.legend=FALSE) + 
+      ggtitle("Support Vectors") +
+      xlab("Credit Score") + 
+      ylab("Income")
+    
+    #print(p) Printing disabled because of redundancy
+    # calculate a1.am
+    a <- colSums(svm.vanilla.model@xmatrix[[1]] * svm.vanilla.model@coef[[1]])
+    a
+    
+    # calculate a0
+    a0 <- svm.vanilla.model@b
+    
+    # see what the svm.vanilla.model predicts
+    pred <- predict(svm.vanilla.model,select(cc.DF,c('Income','CreditScore')))
+    
+    summary(pred)
+    
+    cm <- confusionMatrix(factor(cc.DF[,11],levels=c(1,0)),pred)
+    
+    #print("Confusion Matrix for the Kernel %s when C %s is: ",k,C,cm$table)
+
+    # Let us print the Confusion Matrix
+    # A strong diagonal means good prediction
+    accuracy <- c(accuracy,cm$overall[1])
+    # Print the Confusion Matrix
+    #cm$table
+  }
+}
+print(p) # We are printing just the last Support Vector visualization for cleaner document purposes
+```
+**Note: ** *We just printed only one sample visualization for demonstration & in particular to avoid a deluge of visualization*
+
+```{R}
+results.2features.DF <- do.call(rbind,Map(data.frame,"Kernel"=kernel,"Cost"=cost,"Accuracy"=accuracy,"Features"=features))
+head(results.2features.DF)
+```
+
+**Let us plot the results**
+```{r }
+ggplot(results.2features.DF) + geom_line(aes(x=Cost, y=Accuracy, colour=Kernel)) +
+  ggtitle("vanilladot vs rbfdot Accuracy - Features[Income, Credit Score]") +
+  scale_colour_manual(values=c("red","blue","green","black","yellow","pink","cyan"))
+```
+```{R}
+paste0("The Kernel '",results.2features.DF[which.max(results.2features.DF$Accuracy),'Kernel'], "' with C=",results.2features.DF[which.max(results.2features.DF$Accuracy),'Cost'], " has the highest accuracy of ",round(results.2features.DF[which.max(results.2features.DF$Accuracy),'Accuracy']*100,2),"%")
+
+```
+
+### Question 2.2.2
+
+**You are welcome, but not required, to try other (nonlinear) kernels as well; we’re not covering them in this course, but they can sometimes be useful and might provide better predictions than vanilladot.**
+
+**Now that we are done understading, let us go ahead and select all the featues from the dataset, build the model, predict & plot the accuracy**
+
+*By selecting just 2 features, we were able to visualize the Support Vectors clearly.  Now we can go ahead and include all the 10 features and fit the SVM model and validate accuracy of the same.*
+
+```{r warning=FALSE}
+cc.DF <- read.table("C:/Users/ashokb/Desktop/Desktop/Georgia Tech/Introduction To Analytics Modeling/HW-1/credit_card_data-headers.txt",header=TRUE)
+
+setnames(cc.DF,old=c("A1","A2","A3","A8","A9","A10","A11","A12","A14","A15","R1"),new=c("Sex","Age","Debt","YearsEmployed","PriorDefault","BankCustomer","CreditScore","Citizen","Zipcode","Income","Approved"))
+
+kernel <- list()
+cost <- list()
+accuracy <- list()
+features <- list()
+for (C in c(1,10,20,30,40,50,60,70,80,90,100))
+{
+  for (k in c('vanilladot','rbfdot','polydot','laplacedot','tanhdot','besseldot','anovadot'))
+  {
+    cost <- c(cost,C)
+    kernel <- c(kernel,k)
+    features <-c(features,'[All]')
+    # Fit non-linear SVM with Gaussian (rbf = radial basis function) kernel
+    
+    # Let us put in all the features now
+    
+    svm.rbf.model <- ksvm(x=as.matrix(cc.DF[,1:10]), #x can be a Matrix or Vector
+                          # data=dataframe, # Used when X is a formula
+                          y=as.factor(cc.DF[,11]), # Response variable
+                          type="C-svc", # Type based on the problem Classification/Regression/Novelty Detection 
+                          kernel=k, #Kernel based on the type of data we are classifying
+                          C=C, # Cost of constraint violation. Default is 1
+                          scaled=TRUE # To indicate if the variables (x & y) to be scaled or not
+                          # Scaling all features to comparable ranges controls the dominance of features with the largest range
+    )
+    
+    # Let us look at how many support vectors we get and let us plot them
+    svm.rbf.model@nSV
+    x <- as.matrix(cc.DF[,1:10])
+    sv <- x[alphaindex(svm.rbf.model)[[1]],]
+    # Print the Support Vectors
+    #as.data.frame(sv)
+    # Plotting the Support Vectors
+    # Its not possible to view all the features.  SO, let us just view Credit Score & Income
+    ggplot(as.data.frame(sv)) + 
+      aes(x=as.data.frame(sv)$CreditScore, y=as.data.frame(sv)$Income, color=as.data.frame(sv)$Approved) + 
+      #aes(x=cc.DF$CreditScore, y=cc.DF$Income, shape=factor(cc.DF$Approved)) +
+      geom_point(show.legend=FALSE) + 
+      ggtitle("Effect of Credit Score & Income on Credit Approval") +
+      xlab("Credit Score") + 
+      ylab("Income")
+    
+    # calculate a1.am
+    a <- colSums(svm.rbf.model@xmatrix[[1]] * svm.rbf.model@coef[[1]])
+
+    # calculate a0
+    a0 <- svm.rbf.model@b
+
+    # see what the svm.model predicts
+    pred <- predict(svm.rbf.model,cc.DF[,1:10])
+    
+    #summary(pred)
+    
+    cm <- confusionMatrix(factor(cc.DF[,11],levels=c(1,0)),pred)
+    
+    # Let us print the Confusion Matrix
+    # A strong diagonal means good prediction
+    accuracy <- c(accuracy,cm$overall[1])
+    # Print the Confusion Matrix
+    #cm$table
+  }
+}
+
+```
+
+```{r}
+results.all.DF <- do.call(rbind,Map(data.frame,"Kernel"=kernel,"Cost"=cost,"Accuracy"=accuracy,"Features"=features ))
+head(results.all.DF)
+```
+**Let us Plot the results and pick up the best model**
+```{r}
+ggplot(results.all.DF) + geom_line(aes(x=Cost, y=Accuracy, colour=Kernel)) +
+  ggtitle("vanilladot vs rbfdot Accuracy - Features[All]") +
+  scale_colour_manual(values=c("red","blue","green","black","yellow","pink","cyan"))
+```
+
+```{R}
+paste0("The Kernel '",results.all.DF[which.max(results.all.DF$Accuracy),'Kernel'], "' with C=",results.all.DF[which.max(results.all.DF$Accuracy),'Cost'], " has the highest accuracy of ",round(results.all.DF[which.max(results.all.DF$Accuracy),'Accuracy']*100,2),"%")
+
+```
+
+```{R}
+best.model <- ksvm(x=as.matrix(cc.DF[,1:10]), #x can be a Matrix or Vector
+                          # data=dataframe, # Used when X is a formula
+                          y=as.factor(cc.DF[,11]), # Response variable
+                          type="C-svc", # Type based on the problem Classification/Regression/Novelty Detection 
+                          kernel='laplacedot', #Kernel based on the type of data we are classifying
+                          C=100, # Cost of constraint violation. Default is 1
+                          scaled=TRUE # To indicate if the variables (x & y) to be scaled or not
+                          # Scaling all features to comparable ranges controls the dominance of features with the largest range
+)
+
+# calculate a1.am
+a <- colSums(svm.rbf.model@xmatrix[[1]] * svm.rbf.model@coef[[1]])
+
+# calculate a0
+a0 <- svm.rbf.model@b
+```
+
+### SVM Classifier Model:
+
+```{R}
+paste0("The equation for the winning classifier is :",round(a0,2),
+       "+[",round(a['Sex'],2),"*Sex]",
+       "+[",round(a['Age'],2),"*Age]",
+       "+[",round(a['Debt'],2),"*Debt]",
+       "+[",round(a['YearsEmployed'],2),"*YearsEmployed]",
+       "+[",round(a['PriorDefault'],2),"*PriorDefault]",
+       "+[",round(a['BankCustomer'],2),"*BankCustomer]",
+       "+[",round(a['CreditScore'],2),"*CreditScore]",
+       "+[",round(a['Citizen'],2),"*Citizen]",
+       "+[",round(a['Zipcode'],2),"*Zipcode]",
+       "+[",round(a['Income'],2),"*Income]"
+       )
+    
+```
+### Conclusion
+**From the Cost vs Accuracy Visualization, we infer the following:**
+
+- The variation of C doesn't have any effect on accuracy for kernels besseldot, tanhdot anovadot.  They are not good classifiers for this dataset
+
+- The variation of C is producing inconsistent accuracies for the kernel vanilladot.  As we know that vanilladot is a linear kernel and as our data is not linearly separable, this is not the kernel ideal for this dataset
+
+- Like vanilladot, the kernel polydot is also producing inconsistent accuracies.  As this kernel is primarily used for Image Classification, this is also not the right one for our dataset
+
+- Both laplacedot & rbfdot, are good when the data is not linearly separable and when no further prior knowledge is available about the data. Looking at the visualization, though the accuracy is high for rbfdot compared to laplacedot, laplacedot is producing consistent accuracies than rbfdot.  
+
+- Based on the visualization it is safe to lean on laplacedot and tune the hyperparameters for better accuracy.
+
+## k-Nearest Neighbour
+
+```
+In pattern recognition, the k-nearest neighbors algorithm (k-NN) is a non-parametric method used for classification and regression.  In both cases, the input consists of the k closest training examples in the feature space. The output depends on whether k-NN is used for classification or regression:
+
+In k-NN classification, the output is a class membership. An object is classified by a plurality vote of its neighbors, with the object being assigned to the class most common among its k nearest neighbors (k is a positive integer, typically small). If k = 1, then the object is simply assigned to the class of that single nearest neighbor.
+
+In k-NN regression, the output is the property value for the object. This value is the average of the values of k nearest neighbors.
+
+```
+
+### Question 2.2.3
+
+**Using the k-nearest-neighbors classification function kknn contained in the R kknn package, suggest a good value of k, and show how well it classifies that data points in the full data set.**
+
+### How to chose the value of K?
+
+- There is no structured method to find the best value for “K”. We need to find out with various values by trial and error and assuming that training data is unknown.
+
+- Choosing smaller values for K can be noisy and will have a higher influence on the result.
+
+- Larger values of K will have smoother decision boundaries which mean lower variance but increased bias. Also, computationally expensive.
+
+- In general, practice, choosing the value of k is k = sqrt(N) where N stands for the number of samples in your training dataset.
+
+**Let us start with K=1 & loop through SQRT(# of records) and plot the accuracies**
+
+
+```{R}
+kernel <- list()
+accuracy <- list()
+neighbors <- list()
+predicted <- list()
+k<- 1
+while (k <= ceiling(sqrt(nrow(cc.DF))))
+{
+  for (krnl in c('rectangular','triangular','epanechnikov','biweight','triweight','cos','inv','gaussian','rank','optimal'))
+  {
+    kernel <- c(kernel,krnl)
+    for (index in 1:nrow(cc.DF))
+    {
+      # cc.DF[-i] means we remove row i of the data when finding nearest neighbors. Otherwise, it'll be its own nearest neighbor!
+      kNN.model <- kknn(Approved ~.,
+                        cc.DF[-index,],
+                        cc.DF[index,], 
+                        distance=1, # Parameter of Minkowski distance.
+                        k=k, # Number of neighbors considered
+                        kernel=krnl, # Kernel to use. Possible choices are "rectangular" (which is standard unweighted knn), "triangular", "epanechnikov" (or beta(2,2)), "biweight" (or beta(3,3)), "triweight" (or beta(4,4)), "cos", "inv", "gaussian", "rank" and "optimal"
+                        scale=TRUE)
+      #If prediction < 0.5, round to 0
+      # If prediction >=0.5, round to 1
+      predicted[index] <- as.integer(fitted(kNN.model)+0.5)
+      
+    }
+    neighbors <- c(neighbors,k)
+    accuracy <- c(accuracy,sum(predicted == cc.DF[,11]) / nrow(cc.DF))
+  }
+  k <- k+2
+}
+
+```
+
+
+```{R}
+results.kNN.DF<- do.call(rbind,Map(data.frame,"Kernel"=kernel,"K"=neighbors,"Accuracy"=accuracy ))
+head(results.kNN.DF,10)
+```
+
+```{R}
+# Let us Plot the results
+ggplot(results.kNN.DF) + geom_line(aes(x=K, y=Accuracy, colour=Kernel)) +
+  ggtitle("kNN - Accuracy - Features[All]") +
+  scale_colour_manual(values=c("red","blue","green","yellow","orange","black","pink","cyan","magenta","white"))  
+  #scale_x_discrete(limits=c("1", "3","5", "7","9", "11","13", "15","17", "19","21", "23","25", "27","29")) 
+  #scale_y_discrete(limits=c("0.80", "0.86","0.87", "0.88","0.89", "0.90","0.91", "0.92","0.93", "0.94"))
+```
+
+```{R}
+paste0("The Kernel '",results.kNN.DF[which.max(results.kNN.DF$Accuracy),'Kernel'], "' with K=",results.kNN.DF[which.max(results.kNN.DF$Accuracy),'K'], " has the highest accuracy of ",round(results.kNN.DF[which.max(results.kNN.DF$Accuracy),'Accuracy']*100,2),"%")
+
+```
+
+### Conclusion
+
+**From the visualization of Accuracy for different K values & Kernels, we infer the following:**
+
+- Almost all the kernels produce progressively better accuracies when the K values increase, but ultimately drops afterwards
+
+- For this dataset the 'inv' kernel produced the best accuracy with 11 neighbors
+
+```{R}
+best.kNN.model <- kknn(Approved ~.,
+                        cc.DF[-index,],
+                        cc.DF[index,], 
+                        distance=1, # Parameter of Minkowski distance.
+                        k=11, # Number of neighbors considered
+                        kernel='inv', # Kernel to use. Possible choices are "rectangular" (which is standard unweighted knn), "triangular", "epanechnikov" (or beta(2,2)), "biweight" (or beta(3,3)), "triweight" (or beta(4,4)), "cos", "inv", "gaussian", "rank" and "optimal"
+                        scale=TRUE)
+
+print(best.kNN.model)
+```
+
+
